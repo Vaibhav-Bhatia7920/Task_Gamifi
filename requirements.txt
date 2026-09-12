@@ -1,0 +1,14 @@
+pydantic
+langgraph
+fastapi
+uvicorn[standard]
+sqlalchemy
+aiosqlite
+asyncpg
+greenlet
+bcrypt
+python-jose[cryptography]
+email-validator
+python-multipart
+openai
+python-dotenv
