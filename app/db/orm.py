@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, delete, select
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, delete, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -38,6 +38,7 @@ class Timeline(Base):
     __tablename__ = "timeline"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     title: Mapped[str] = mapped_column(String(255))
     category: Mapped[str] = mapped_column(String(128), default="")
     source: Mapped[str] = mapped_column(String(32), default="user")
@@ -54,9 +55,19 @@ class Timeline(Base):
     )
 
 
+def _ensure_timeline_user_id(sync_conn) -> None:
+    inspector = inspect(sync_conn)
+    if "timeline" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("timeline")}
+    if "user_id" not in columns:
+        sync_conn.execute(text("ALTER TABLE timeline ADD COLUMN user_id INTEGER"))
+
+
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_timeline_user_id)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -66,6 +77,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def get_user_by_email(session: AsyncSession, email: str) -> Optional[User]:
     result = await session.execute(select(User).where(User.email == email))
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
+    result = await session.execute(select(User).where(User.id == user_id))
     return result.scalar_one_or_none()
 
 
@@ -87,6 +103,7 @@ async def flush_users(session: AsyncSession) -> int:
 async def create_timeline(
     session: AsyncSession,
     *,
+    user_id: int,
     title: str,
     category: str,
     source: str,
@@ -99,6 +116,7 @@ async def create_timeline(
     approved: bool,
 ) -> Timeline:
     row = Timeline(
+        user_id=user_id,
         title=title,
         category=category,
         source=source,
@@ -116,11 +134,19 @@ async def create_timeline(
     return row
 
 
-async def get_timeline(session: AsyncSession, timeline_id: int) -> Optional[Timeline]:
-    result = await session.execute(select(Timeline).where(Timeline.id == timeline_id))
+async def get_timeline(
+    session: AsyncSession,
+    timeline_id: int,
+    user_id: int,
+) -> Optional[Timeline]:
+    result = await session.execute(
+        select(Timeline).where(Timeline.id == timeline_id, Timeline.user_id == user_id)
+    )
     return result.scalar_one_or_none()
 
 
-async def list_timelines(session: AsyncSession) -> List[Timeline]:
-    result = await session.execute(select(Timeline).order_by(Timeline.id.desc()))
+async def list_timelines(session: AsyncSession, user_id: int) -> List[Timeline]:
+    result = await session.execute(
+        select(Timeline).where(Timeline.user_id == user_id).order_by(Timeline.id.desc())
+    )
     return list(result.scalars().all())
