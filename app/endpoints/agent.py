@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,11 +16,6 @@ class AgentRequest(BaseModel):
     message: str = Field(min_length=1)
 
 
-class IngestRequest(BaseModel):
-    raw_data: Optional[str] = None
-    topic: Optional[str] = None
-
-
 class TimelineOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,6 +25,8 @@ class TimelineOut(BaseModel):
     category: str
     source: str
     raw_data: str
+    extracted_content: Optional[str] = None
+    difficulty_score: int = 0
     structured: Dict[str, Any]
     timeline_plan: Dict[str, Any]
     rewards: Dict[str, Any]
@@ -56,6 +53,8 @@ async def _persist_pipeline(db: AsyncSession, result: Dict[str, Any], user: User
         category=compiled.get("category") or structured.get("category") or "",
         source=result.get("source") or "system",
         raw_data=result.get("raw_data") or "",
+        extracted_content=result.get("extracted_content") or "",
+        difficulty_score=int(result.get("difficulty_score") or compiled.get("difficulty_score") or 0),
         structured=structured,
         timeline_plan=result.get("timeline") or {},
         rewards=result.get("rewards") or {},
@@ -67,13 +66,27 @@ async def _persist_pipeline(db: AsyncSession, result: Dict[str, Any], user: User
 
 @router.post("/ingest", response_model=TimelineOut, status_code=status.HTTP_201_CREATED)
 async def ingest(
-    payload: IngestRequest,
+    raw_data: Optional[str] = Form(None),
+    topic: Optional[str] = Form(None),
+    pdf: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Timeline:
     _require_openai_key()
+    pdf_bytes = None
+    if pdf is not None and pdf.filename:
+        filename = pdf.filename.lower()
+        if not filename.endswith(".pdf"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only PDF files are supported",
+            )
+        pdf_bytes = await pdf.read()
+        if not pdf_bytes:
+            pdf_bytes = None
+
     try:
-        result = await run_pipeline(raw_data=payload.raw_data, topic=payload.topic)
+        result = await run_pipeline(raw_data=raw_data, topic=topic, pdf_bytes=pdf_bytes)
         return await _persist_pipeline(db, result, user)
     except HTTPException:
         raise

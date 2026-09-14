@@ -12,3 +12,7 @@ email-validator
 python-multipart
 openai
 python-dotenv
+alembic
+psycopg2-binary
+pypdf
+tavily-python

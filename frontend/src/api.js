@@ -64,10 +64,10 @@ export function getTask(token, id) {
   return api(`/agent/timelines/${id}`, { token });
 }
 
-export function ingestTask(token, { raw_data, topic }) {
-  return api("/agent/ingest", {
-    method: "POST",
-    token,
-    json: { raw_data: raw_data || null, topic: topic || null },
-  });
+export function ingestTask(token, { raw_data, topic, pdf }) {
+  const form = new FormData();
+  if (raw_data) form.append("raw_data", raw_data);
+  if (topic) form.append("topic", topic);
+  if (pdf) form.append("pdf", pdf);
+  return api("/agent/ingest", { method: "POST", token, form });
 }

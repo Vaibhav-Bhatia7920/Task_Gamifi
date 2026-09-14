@@ -71,6 +71,7 @@ export default function TasksPage() {
               <p className="muted clamp">{task.compiled?.summary || task.raw_data}</p>
               <div className="meta">
                 <span>{task.total_points} pts</span>
+                <span>{task.difficulty_score ?? 0}/100</span>
                 <span>{task.compiled?.levels?.length || 0} levels</span>
               </div>
             </Link>

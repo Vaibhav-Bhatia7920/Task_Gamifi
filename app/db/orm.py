@@ -1,14 +1,17 @@
+import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, delete, inspect, select, text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.config import DATABASE_URL
 
-# Local SQLite for now. Replace DATABASE_URL with Postgres later, e.g.
-# postgresql+asyncpg://user:password@localhost:5432/task_gamifi
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# DATABASE_URL comes from app/.env POSTGRES_* values, or sqlite if those are unset.
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(
@@ -47,6 +50,8 @@ class Timeline(Base):
     timeline_plan: Mapped[Dict[str, Any]] = mapped_column(JSON)
     rewards: Mapped[Dict[str, Any]] = mapped_column(JSON)
     compiled: Mapped[Dict[str, Any]] = mapped_column(JSON)
+    extracted_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    difficulty_score: Mapped[int] = mapped_column(Integer, default=0)
     total_points: Mapped[int] = mapped_column(Integer, default=0)
     approved: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -55,19 +60,16 @@ class Timeline(Base):
     )
 
 
-def _ensure_timeline_user_id(sync_conn) -> None:
-    inspector = inspect(sync_conn)
-    if "timeline" not in inspector.get_table_names():
-        return
-    columns = {column["name"] for column in inspector.get_columns("timeline")}
-    if "user_id" not in columns:
-        sync_conn.execute(text("ALTER TABLE timeline ADD COLUMN user_id INTEGER"))
+def run_migrations() -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    command.upgrade(config, "head")
 
 
 async def init_db() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_ensure_timeline_user_id)
+    await asyncio.to_thread(run_migrations)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -114,6 +116,8 @@ async def create_timeline(
     compiled: Dict[str, Any],
     total_points: int,
     approved: bool,
+    extracted_content: str = "",
+    difficulty_score: int = 0,
 ) -> Timeline:
     row = Timeline(
         user_id=user_id,
@@ -125,6 +129,8 @@ async def create_timeline(
         timeline_plan=timeline_plan,
         rewards=rewards,
         compiled=compiled,
+        extracted_content=extracted_content,
+        difficulty_score=difficulty_score,
         total_points=total_points,
         approved=approved,
     )
@@ -150,3 +156,16 @@ async def list_timelines(session: AsyncSession, user_id: int) -> List[Timeline]:
         select(Timeline).where(Timeline.user_id == user_id).order_by(Timeline.id.desc())
     )
     return list(result.scalars().all())
+
+
+async def main():
+
+    async for session in get_db():
+        user = await get_user_by_email(session, "test@example.com")
+        print(user)
+        print(user.email)
+        print(user.hashed_password)
+        
+
+if __name__ == "__main__":
+    asyncio.run(main())

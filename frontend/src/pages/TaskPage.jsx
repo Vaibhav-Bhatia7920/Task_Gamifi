@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { getTask, ingestTask } from "../api";
 import { useAuth } from "../auth";
 
@@ -7,12 +7,14 @@ export default function TaskPage({ isNew = false }) {
   const { id } = useParams();
   const { token, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromPlanner = Boolean(location.state?.fromPlanner);
   const [task, setTask] = useState(null);
   const [rawData, setRawData] = useState("");
   const [topic, setTopic] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(!isNew);
-  const [planning, setPlanning] = useState(false);
+  const [pdf, setPdf] = useState(null);
 
   useEffect(() => {
     if (isNew) return undefined;
@@ -43,8 +45,8 @@ export default function TaskPage({ isNew = false }) {
     setError("");
     setPlanning(true);
     try {
-      const created = await ingestTask(token, { raw_data: rawData, topic });
-      navigate(`/tasks/${created.id}`, { replace: true });
+      const created = await ingestTask(token, { raw_data: rawData, topic, pdf });
+      navigate(`/tasks/${created.id}`, { replace: true, state: { fromPlanner: true } });
     } catch (err) {
       if (err.status === 401) {
         logout();
@@ -64,8 +66,8 @@ export default function TaskPage({ isNew = false }) {
     <div className="shell">
       <header className="topbar">
         <div>
-          <Link className="back" to="/tasks">
-            ← Tasks
+          <Link className="ghost back" to={fromPlanner ? "/tasks/new" : "/tasks"}>
+            ← Back
           </Link>
           <h1>{isNew ? "New task" : compiled.title || task?.title || "Task"}</h1>
         </div>
@@ -74,8 +76,8 @@ export default function TaskPage({ isNew = false }) {
       {isNew ? (
         <form className="panel stack" onSubmit={onPlan}>
           <p className="lede">
-            Drop in messy notes if you have them. If you leave this blank, the planner will
-            chart a starter path across the sky for you.
+            Add a topic, paste notes, or upload a PDF. If you give a topic or URL, the planner
+            searches the web with Tavily. Difficulty is scored from 0 to 100.
           </p>
           <label>
             Optional topic
@@ -86,12 +88,21 @@ export default function TaskPage({ isNew = false }) {
             />
           </label>
           <label>
+            PDF
+            <input
+              type="file"
+              accept="application/pdf,.pdf"
+              onChange={(event) => setPdf(event.target.files?.[0] || null)}
+            />
+          </label>
+          <label>
             Raw material
             <textarea
+              className="raw-material"
               rows={10}
               value={rawData}
               onChange={(event) => setRawData(event.target.value)}
-              placeholder="Syllabus, brain dump, goals, constraints..."
+              placeholder="Notes, a URL, or leave blank if you uploaded a PDF / set a topic..."
             />
           </label>
           {error ? <p className="error">{error}</p> : null}
@@ -117,9 +128,13 @@ export default function TaskPage({ isNew = false }) {
             <p className="lede">{compiled.summary}</p>
             <div className="meta">
               <span>{task.total_points} pts</span>
+              <span>{task.difficulty_score ?? compiled.difficulty_score ?? 0}/100 difficulty</span>
               <span>{levels.length} levels</span>
               <span>{compiled.approved ? "Reviewed" : "Needs review"}</span>
             </div>
+            {task.extracted_content ? (
+              <p className="muted clamp">{task.extracted_content}</p>
+            ) : null}
             {compiled.review_notes ? (
               <p className="muted">{compiled.review_notes}</p>
             ) : null}
